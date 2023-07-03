@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,12 +19,13 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 
 	"github.com/containerd/containerd/platforms"
+	"github.com/containers/storage/pkg/regexp"
 	"github.com/openshift/imagebuilder/signal"
 	"github.com/openshift/imagebuilder/strslice"
 )
 
 var (
-	obRgex = regexp.MustCompile(`(?i)^\s*ONBUILD\s*`)
+	obRgex = regexp.Delayed(`(?i)^\s*ONBUILD\s*`)
 )
 
 var localspec = platforms.DefaultSpec()
@@ -53,7 +53,6 @@ func init() {
 //
 // Sets the environment variable foo to bar, also makes interpolation
 // in the dockerfile available from the next statement on via ${foo}.
-//
 func env(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("ENV")
@@ -106,7 +105,6 @@ func maintainer(b *Builder, args []string, attributes map[string]bool, flagArgs 
 // LABEL some json data describing the image
 //
 // Sets the Label variable foo to bar,
-//
 func label(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("LABEL")
@@ -133,16 +131,21 @@ func label(b *Builder, args []string, attributes map[string]bool, flagArgs []str
 //
 // Add the file 'foo' to '/path'. Tarball and Remote URL (git, http) handling
 // exist here. If you do not wish to have this automatic handling, use COPY.
-//
 func add(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) < 2 {
-		return errAtLeastOneArgument("ADD")
+		return errAtLeastTwoArgument("ADD")
 	}
 	var chown string
 	var chmod string
 	last := len(args) - 1
 	dest := makeAbsolute(args[last], b.RunConfig.WorkingDir)
-	userArgs := mergeEnv(envMapAsSlice(b.Args), b.Env)
+	filteredUserArgs := make(map[string]string)
+	for k, v := range b.Args {
+		if _, ok := b.AllowedArgs[k]; ok {
+			filteredUserArgs[k] = v
+		}
+	}
+	userArgs := mergeEnv(envMapAsSlice(filteredUserArgs), b.Env)
 	for _, a := range flagArgs {
 		arg, err := ProcessWord(a, userArgs)
 		if err != nil {
@@ -168,10 +171,9 @@ func add(b *Builder, args []string, attributes map[string]bool, flagArgs []strin
 // COPY foo /path
 //
 // Same as 'ADD' but without the tar and remote url handling.
-//
 func dispatchCopy(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) < 2 {
-		return errAtLeastOneArgument("COPY")
+		return errAtLeastTwoArgument("COPY")
 	}
 	last := len(args) - 1
 	dest := makeAbsolute(args[last], b.RunConfig.WorkingDir)
@@ -206,7 +208,6 @@ func dispatchCopy(b *Builder, args []string, attributes map[string]bool, flagArg
 // FROM imagename
 //
 // This sets the image the dockerfile will build on top of.
-//
 func from(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	switch {
 	case len(args) == 1:
@@ -223,8 +224,20 @@ func from(b *Builder, args []string, attributes map[string]bool, flagArgs []stri
 	for n, v := range b.HeadingArgs {
 		argStrs = append(argStrs, n+"="+v)
 	}
+	defaultArgs := envMapAsSlice(builtinBuildArgs)
+	filteredUserArgs := make(map[string]string)
+	for k, v := range b.UserArgs {
+		for _, a := range b.GlobalAllowedArgs {
+			if a == k {
+				filteredUserArgs[k] = v
+			}
+		}
+	}
+	userArgs := mergeEnv(envMapAsSlice(filteredUserArgs), b.Env)
+	userArgs = mergeEnv(defaultArgs, userArgs)
+	nameArgs := mergeEnv(argStrs, userArgs)
 	var err error
-	if name, err = ProcessWord(name, argStrs); err != nil {
+	if name, err = ProcessWord(name, nameArgs); err != nil {
 		return err
 	}
 
@@ -232,6 +245,19 @@ func from(b *Builder, args []string, attributes map[string]bool, flagArgs []stri
 	if name == NoBaseImageSpecifier {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows does not support FROM scratch")
+		}
+	}
+	for _, a := range flagArgs {
+		arg, err := ProcessWord(a, userArgs)
+		if err != nil {
+			return err
+		}
+		switch {
+		case strings.HasPrefix(arg, "--platform="):
+			platformString := strings.TrimPrefix(arg, "--platform=")
+			b.Platform = platformString
+		default:
+			return fmt.Errorf("FROM only supports the --platform flag")
 		}
 	}
 	b.RunConfig.Image = name
@@ -247,7 +273,6 @@ func from(b *Builder, args []string, attributes map[string]bool, flagArgs []stri
 // evaluator.go and comments around dispatch() in the same file explain the
 // special cases. search for 'OnBuild' in internals.go for additional special
 // cases.
-//
 func onbuild(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("ONBUILD")
@@ -270,7 +295,6 @@ func onbuild(b *Builder, args []string, attributes map[string]bool, flagArgs []s
 // WORKDIR /tmp
 //
 // Set the working directory for future RUN/CMD/etc statements.
-//
 func workdir(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) != 1 {
 		return errExactlyOneArgument("WORKDIR")
@@ -298,7 +322,6 @@ func workdir(b *Builder, args []string, attributes map[string]bool, flagArgs []s
 // RUN echo hi          # sh -c echo hi       (Linux)
 // RUN echo hi          # cmd /S /C echo hi   (Windows)
 // RUN [ "echo", "hi" ] # echo hi
-//
 func run(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if b.RunConfig.Image == "" {
 		return fmt.Errorf("Please provide a source image with `from` prior to run")
@@ -307,7 +330,14 @@ func run(b *Builder, args []string, attributes map[string]bool, flagArgs []strin
 	args = handleJSONArgs(args, attributes)
 
 	var mounts []string
-	userArgs := mergeEnv(envMapAsSlice(b.Args), b.Env)
+	var network string
+	filteredUserArgs := make(map[string]string)
+	for k, v := range b.Args {
+		if _, ok := b.AllowedArgs[k]; ok {
+			filteredUserArgs[k] = v
+		}
+	}
+	userArgs := mergeEnv(envMapAsSlice(filteredUserArgs), b.Env)
 	for _, a := range flagArgs {
 		arg, err := ProcessWord(a, userArgs)
 		if err != nil {
@@ -317,14 +347,17 @@ func run(b *Builder, args []string, attributes map[string]bool, flagArgs []strin
 		case strings.HasPrefix(arg, "--mount="):
 			mount := strings.TrimPrefix(arg, "--mount=")
 			mounts = append(mounts, mount)
+		case strings.HasPrefix(arg, "--network="):
+			network = strings.TrimPrefix(arg, "--network=")
 		default:
-			return fmt.Errorf("RUN only supports the --mount flag")
+			return fmt.Errorf("RUN only supports the --mount and --network flag")
 		}
 	}
 
 	run := Run{
-		Args:   args,
-		Mounts: mounts,
+		Args:    args,
+		Mounts:  mounts,
+		Network: network,
 	}
 
 	if !attributes["json"] {
@@ -338,7 +371,6 @@ func run(b *Builder, args []string, attributes map[string]bool, flagArgs []strin
 //
 // Set the default command to run in the container (which may be empty).
 // Argument handling is the same as RUN.
-//
 func cmd(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	cmdSlice := handleJSONArgs(args, attributes)
 
@@ -364,7 +396,6 @@ func cmd(b *Builder, args []string, attributes map[string]bool, flagArgs []strin
 //
 // Handles command processing similar to CMD and RUN, only b.RunConfig.Entrypoint
 // is initialized at NewBuilder time instead of through argument parsing.
-//
 func entrypoint(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	parsed := handleJSONArgs(args, attributes)
 
@@ -396,7 +427,6 @@ func entrypoint(b *Builder, args []string, attributes map[string]bool, flagArgs 
 //
 // Expose ports for links and port mappings. This all ends up in
 // b.RunConfig.ExposedPorts for runconfig.
-//
 func expose(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("EXPOSE")
@@ -424,7 +454,6 @@ func expose(b *Builder, args []string, attributes map[string]bool, flagArgs []st
 //
 // Set the user to 'foo' for future commands and when running the
 // ENTRYPOINT/CMD at container run time.
-//
 func user(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) != 1 {
 		return errExactlyOneArgument("USER")
@@ -437,7 +466,6 @@ func user(b *Builder, args []string, attributes map[string]bool, flagArgs []stri
 // VOLUME /foo
 //
 // Expose the volume /foo for use. Will also accept the JSON array form.
-//
 func volume(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("VOLUME")
@@ -478,7 +506,6 @@ func stopSignal(b *Builder, args []string, attributes map[string]bool, flagArgs 
 //
 // Set the default healthcheck command to run in the container (which may be empty).
 // Argument handling is the same as RUN.
-//
 func healthcheck(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
 	if len(args) == 0 {
 		return errAtLeastOneArgument("HEALTHCHECK")
@@ -573,65 +600,63 @@ var targetArgs = []string{"TARGETOS", "TARGETARCH", "TARGETVARIANT"}
 // to builder using the --build-arg flag for expansion/subsitution or passing to 'run'.
 // Dockerfile author may optionally set a default value of this variable.
 func arg(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("ARG requires exactly one argument definition")
-	}
-
 	var (
 		name       string
 		value      string
 		hasDefault bool
 	)
 
-	arg := args[0]
-	// 'arg' can just be a name or name-value pair. Note that this is different
-	// from 'env' that handles the split of name and value at the parser level.
-	// The reason for doing it differently for 'arg' is that we support just
-	// defining an arg and not assign it a value (while 'env' always expects a
-	// name-value pair). If possible, it will be good to harmonize the two.
-	if strings.Contains(arg, "=") {
-		parts := strings.SplitN(arg, "=", 2)
-		name = parts[0]
-		value = parts[1]
-		hasDefault = true
-		if name == "TARGETPLATFORM" {
-			p, err := platforms.Parse(value)
-			if err != nil {
-				return fmt.Errorf("error parsing TARGETPLATFORM argument")
+	for _, argument := range args {
+		arg := argument
+		// 'arg' can just be a name or name-value pair. Note that this is different
+		// from 'env' that handles the split of name and value at the parser level.
+		// The reason for doing it differently for 'arg' is that we support just
+		// defining an arg and not assign it a value (while 'env' always expects a
+		// name-value pair). If possible, it will be good to harmonize the two.
+		if strings.Contains(arg, "=") {
+			parts := strings.SplitN(arg, "=", 2)
+			name = parts[0]
+			value = parts[1]
+			hasDefault = true
+			if name == "TARGETPLATFORM" {
+				p, err := platforms.Parse(value)
+				if err != nil {
+					return fmt.Errorf("error parsing TARGETPLATFORM argument")
+				}
+				for _, val := range targetArgs {
+					b.AllowedArgs[val] = true
+				}
+				b.Args["TARGETPLATFORM"] = p.OS + "/" + p.Architecture
+				b.Args["TARGETOS"] = p.OS
+				b.Args["TARGETARCH"] = p.Architecture
+				b.Args["TARGETVARIANT"] = p.Variant
+				if p.Variant != "" {
+					b.Args["TARGETPLATFORM"] = b.Args["TARGETPLATFORM"] + "/" + p.Variant
+				}
 			}
-			for _, val := range targetArgs {
-				b.AllowedArgs[val] = true
-			}
-			b.Args["TARGETPLATFORM"] = p.OS + "/" + p.Architecture
-			b.Args["TARGETOS"] = p.OS
-			b.Args["TARGETARCH"] = p.Architecture
-			b.Args["TARGETVARIANT"] = p.Variant
-			if p.Variant != "" {
-				b.Args["TARGETPLATFORM"] = b.Args["TARGETPLATFORM"] + "/" + p.Variant
-			}
+		} else if val, ok := builtinBuildArgs[arg]; ok {
+			name = arg
+			value = val
+			hasDefault = true
+		} else {
+			name = arg
+			hasDefault = false
 		}
-	} else if val, ok := builtinBuildArgs[arg]; ok {
-		name = arg
-		value = val
-		hasDefault = true
-	} else {
-		name = arg
-		hasDefault = false
-	}
-	// add the arg to allowed list of build-time args from this step on.
-	b.AllowedArgs[name] = true
+		// add the arg to allowed list of build-time args from this step on.
+		b.AllowedArgs[name] = true
 
-	// If there is still no default value, a value can be assigned from the heading args
-	if val, ok := b.HeadingArgs[name]; ok && !hasDefault {
-		b.Args[name] = val
-	}
+		// If there is still no default value, a value can be assigned from the heading args
+		if val, ok := b.HeadingArgs[name]; ok && !hasDefault {
+			b.Args[name] = val
+		}
 
-	// If there is a default value associated with this arg then add it to the
-	// b.buildArgs, later default values for the same arg override earlier ones.
-	// The args passed to builder (UserArgs) override the default value of 'arg'
-	// Don't add them here as they were already set in NewBuilder.
-	if _, ok := b.UserArgs[name]; !ok && hasDefault {
-		b.Args[name] = value
+		// If there is a default value associated with this arg then add it to the
+		// b.buildArgs, later default values for the same arg override earlier ones.
+		// The args passed to builder (UserArgs) override the default value of 'arg'
+		// Don't add them here as they were already set in NewBuilder.
+		if _, ok := b.UserArgs[name]; !ok && hasDefault {
+			b.Args[name] = value
+		}
 	}
 
 	return nil
@@ -667,6 +692,10 @@ func checkChmodConversion(chmod string) error {
 
 func errAtLeastOneArgument(command string) error {
 	return fmt.Errorf("%s requires at least one argument", command)
+}
+
+func errAtLeastTwoArgument(command string) error {
+	return fmt.Errorf("%s requires at least two arguments", command)
 }
 
 func errExactlyOneArgument(command string) error {
