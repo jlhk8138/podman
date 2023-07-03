@@ -20,40 +20,14 @@ lags the upstream release.
 sudo yum -y install buildah
 ```
 
-The [Kubic project](https://build.opensuse.org/project/show/devel:kubic:libcontainers:stable)
-provides updated packages for CentOS 8 and CentOS 8 Stream.
-
-```bash
-# CentOS 8
-sudo dnf -y module disable container-tools
-sudo dnf -y install 'dnf-command(copr)'
-sudo dnf -y copr enable rhcontainerbot/container-selinux
-sudo curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable.repo https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/CentOS_8/devel:kubic:libcontainers:stable.repo
-# OPTIONAL FOR RUNC USERS: crun will be installed by default. Install runc first if you prefer runc
-sudo dnf -y --refresh install runc
-# Install Buildah
-sudo dnf -y --refresh install buildah
-
-# CentOS 8 Stream
-sudo dnf -y module disable container-tools
-sudo dnf -y install 'dnf-command(copr)'
-sudo dnf -y copr enable rhcontainerbot/container-selinux
-sudo curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable.repo https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/CentOS_8_Stream/devel:kubic:libcontainers:stable.repo
-# OPTIONAL FOR RUNC USERS: crun will be installed by default. Install runc first if you prefer runc
-sudo dnf -y --refresh install runc
-# Install Buildah
-sudo dnf -y --refresh install buildah
-```
-
-
 #### [Debian](https://debian.org)
 
 The buildah package is available in
-the [Bullseye (testing) branch](https://packages.debian.org/bullseye/buildah), which
-will be the next stable release (Debian 11) as well as Debian Unstable/Sid.
+the [Bullseye](https://packages.debian.org/bullseye/buildah), which
+is the current stable release (Debian 11), as well as Debian Unstable/Sid.
 
 ```bash
-# Debian Testing/Bullseye or Unstable/Sid
+# Debian Stable/Bullseye or Unstable/Sid
 sudo apt-get update
 sudo apt-get -y install buildah
 ```
@@ -78,9 +52,9 @@ rpm-ostree install buildah
 Note: [`podman`](https://podman.io) build is available by default.
 
 ### [Gentoo](https://www.gentoo.org)
-
+[app-containers/buildah](https://packages.gentoo.org/packages/app-containers/buildah)
 ```bash
-sudo emerge app-emulation/libpod
+sudo emerge app-containers/buildah
 ```
 
 ### [openSUSE](https://www.opensuse.org)
@@ -125,26 +99,6 @@ and newer.
 # Ubuntu 20.10 and newer
 sudo apt-get -y update
 sudo apt-get -y install buildah
-```
-
-If you would prefer newer (though not as well-tested) packages,
-the [Kubic project](https://build.opensuse.org/package/show/devel:kubic:libcontainers:stable/buildah)
-provides packages for active Ubuntu releases 20.04 and newer (it should also work with direct derivatives like Pop!\_OS).
-The packages in Kubic project repos are more frequently updated than the one in Ubuntu's official repositories, due to how Debian/Ubuntu works.
-Checkout the Kubic project page for a list of supported Ubuntu version and architecture combinations.
-The build sources for the Kubic packages can be found [here](https://gitlab.com/rhcontainerbot/buildah/-/tree/debian/debian).
-
-CAUTION: On Ubuntu 20.10 and newer, we highly recommend you use Buildah, Podman and Skopeo ONLY from EITHER the Kubic repo
-OR the official Ubuntu repos. Mixing and matching may lead to unpredictable situations including installation conflicts.
-
-
-```bash
-. /etc/os-release
-sudo sh -c "echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/x${ID^}_${VERSION_ID}/ /' > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list"
-wget -nv https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/x${ID^}_${VERSION_ID}/Release.key -O Release.key
-sudo apt-key add - < Release.key
-sudo apt-get update -qq
-sudo apt-get -qq -y install buildah
 ```
 
 # Building from scratch
@@ -207,7 +161,6 @@ Prior to installing Buildah, install the following packages on your Linux distro
 * bats
 * btrfs-progs-devel
 * bzip2
-* device-mapper-devel
 * git
 * go-md2man
 * gpgme-devel
@@ -227,7 +180,6 @@ In Fedora, you can use this command:
     golang \
     bats \
     btrfs-progs-devel \
-    device-mapper-devel \
     glib2-devel \
     gpgme-devel \
     libassuan-devel \
@@ -254,9 +206,7 @@ Then to install Buildah on Fedora follow the steps in this example:
 
 ### RHEL, CentOS
 
-In RHEL and CentOS 7, ensure that you are subscribed to the `rhel-7-server-rpms`,
-`rhel-7-server-extras-rpms`, `rhel-7-server-optional-rpms` and `EPEL` repositories, then
-run this command:
+In RHEL and CentOS, run this command to install the build dependencies:
 
 ```
  yum -y install \
@@ -264,7 +214,6 @@ run this command:
     golang \
     bats \
     btrfs-progs-devel \
-    device-mapper-devel \
     glib2-devel \
     gpgme-devel \
     libassuan-devel \
@@ -278,11 +227,6 @@ run this command:
 
 The build steps for Buildah on RHEL or CentOS are the same as for Fedora, above.
 
-*NOTE:* Buildah on RHEL or CentOS version 7.* is not supported running as non-root due to
-these systems not having newuidmap or newgidmap installed.  It is possible to pull
-the shadow-utils source RPM from Fedora 29 and build and install from that in order to
-run Buildah as non-root on these systems.
-
 ### openSUSE
 
 On openSUSE Tumbleweed, install go via `zypper in go`, then run this command:
@@ -295,7 +239,6 @@ On openSUSE Tumbleweed, install go via `zypper in go`, then run this command:
     bzip2 \
     libgpgme-devel \
     libseccomp-devel \
-    device-mapper-devel \
     libbtrfs-devel \
     go-md2man
 ```
@@ -305,16 +248,12 @@ The build steps for Buildah on SUSE / openSUSE are the same as for Fedora, above
 
 ### Ubuntu
 
-In Ubuntu zesty and xenial, you can use these commands:
+In Ubuntu jammy you can use these commands:
 
 ```
-  sudo apt-get -y install software-properties-common
-  sudo add-apt-repository -y ppa:alexlarsson/flatpak
-  sudo add-apt-repository -y ppa:gophers/archive
-  sudo apt-add-repository -y ppa:projectatomic/ppa
   sudo apt-get -y -qq update
-  sudo apt-get -y install bats btrfs-tools git libapparmor-dev libdevmapper-dev libglib2.0-dev libgpgme11-dev libseccomp-dev libselinux1-dev skopeo-containers go-md2man
-  sudo apt-get -y install golang-1.13
+  sudo apt-get -y install bats btrfs-progs git libapparmor-dev libglib2.0-dev libgpgme11-dev libseccomp-dev libselinux1-dev skopeo go-md2man make
+  sudo apt-get -y install golang-1.18
 ```
 Then to install Buildah on Ubuntu follow the steps in this example:
 
@@ -324,7 +263,7 @@ Then to install Buildah on Ubuntu follow the steps in this example:
   export GOPATH=`pwd`
   git clone https://github.com/containers/buildah ./src/github.com/containers/buildah
   cd ./src/github.com/containers/buildah
-  PATH=/usr/lib/go-1.13/bin:$PATH make runc all SECURITYTAGS="apparmor seccomp"
+  PATH=/usr/lib/go-1.18/bin:$PATH make runc all SECURITYTAGS="apparmor seccomp"
   sudo make install install.runc
   buildah --help
 ```
@@ -339,7 +278,7 @@ sudo gpg --export 0x018BA5AD9DF57A4448F0E6CF8BECF1637AD8C79D >> /usr/share/keyri
 sudo echo 'deb [signed-by=/usr/share/keyrings/projectatomic-ppa.gpg] http://ppa.launchpad.net/projectatomic/ppa/ubuntu zesty main' > /etc/apt/sources.list.d/projectatomic-ppa.list
 sudo apt update
 sudo apt -y install -t stretch-backports golang
-sudo apt -y install bats btrfs-tools git libapparmor-dev libdevmapper-dev libglib2.0-dev libgpgme11-dev libseccomp-dev libselinux1-dev skopeo-containers go-md2man
+sudo apt -y install bats btrfs-tools git libapparmor-dev libglib2.0-dev libgpgme11-dev libseccomp-dev libselinux1-dev skopeo-containers go-md2man
 ```
 
 The build steps on Debian are otherwise the same as Ubuntu, above.
@@ -376,7 +315,7 @@ cat /etc/containers/registries.conf
 # and 'registries.block'.
 
 [registries.search]
-registries = ['docker.io', 'registry.fedoraproject.org', 'quay.io', 'registry.access.redhat.com', 'registry.centos.org']
+registries = ['docker.io', 'registry.fedoraproject.org', 'quay.io', 'registry.access.redhat.com']
 
 # If you need to access insecure registries, add the registry's fully-qualified name.
 # An insecure registry is one that does not have a valid SSL certificate or only does HTTP.
@@ -449,9 +388,9 @@ cat /etc/containers/policy.json
 
 ## Debug with Delve and the like
 
-To make a source debug build without optimizations use `DEBUG=1`, like:
+To make a source debug build without optimizations use `BUILDDEBUG=1`, like:
 ```
-make all DEBUG=1
+make all BUILDDEBUG=1
 ```
 
 ## Vendoring

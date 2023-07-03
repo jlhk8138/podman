@@ -1,9 +1,9 @@
+//go:build windows
 // +build windows
 
 package sysinfo
 
 import (
-	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -26,12 +26,4 @@ func numCPU() int {
 	// For every available thread a bit is set in the mask.
 	ncpu := int(popcnt(uint64(mask)))
 	return ncpu
-}
-
-// NumCPU returns the number of CPUs which are currently online
-func NumCPU() int {
-	if ncpu := numCPU(); ncpu > 0 {
-		return ncpu
-	}
-	return runtime.NumCPU()
 }
